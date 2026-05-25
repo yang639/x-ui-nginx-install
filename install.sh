@@ -58,65 +58,89 @@ bash <(curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh)
 echo -e "${YELLOW}[*] 配置 x-ui 面板...${NC}"
 
 # 安装依赖
-apt install sqlite3 jq -y
+apt install sqlite3 jq openssl -y
 
-# 获取 x-ui 当前面板端口
+# 等待 x-ui 完全启动并创建数据库
+sleep 5
+
+# 从数据库读取 x-ui 实际配置（凭据、端口）
 XUI_PANEL_PORT=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webPort'" 2>/dev/null || echo "54321")
-echo -e "${YELLOW}[信息] 当前 x-ui 面板端口: ${XUI_PANEL_PORT}${NC}"
+XUI_USER=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webUser'" 2>/dev/null || echo "admin")
+XUI_PASS=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webPass'" 2>/dev/null || echo "admin")
+echo -e "${YELLOW}[信息] x-ui 端口: ${XUI_PANEL_PORT}, 用户: ${XUI_USER}${NC}"
 
-# 将 x-ui 面板端口和路径改为我们生成的随机值
-sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='${XUI_PORT}' WHERE key='webPort'"
-sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='/${XUI_PATH}-xui' WHERE key='webBasePath'"
+# 修改 x-ui 面板端口和路径为我们生成的随机值
+sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='${XUI_PORT}' WHERE key='webPort'" 2>/dev/null || true
+sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='/${XUI_PATH}-xui' WHERE key='webBasePath'" 2>/dev/null || true
 systemctl restart x-ui 2>/dev/null || x-ui restart 2>/dev/null || true
-sleep 3
+sleep 5
 XUI_PANEL_PORT="${XUI_PORT}"
 
-# 登录 x-ui（默认账号 admin/admin）
+# 登录 x-ui（带重试，最多 5 次）
 echo -e "${YELLOW}[信息] 登录 x-ui 面板 API...${NC}"
-LOGIN_RES=$(curl -s -c /tmp/xui-cookie -X POST \
-  "http://127.0.0.1:${XUI_PANEL_PORT}/login" \
-  --data-raw "user=admin&pass=admin")
-echo -e "${YELLOW}[信息] 登录结果: ${LOGIN_RES}${NC}"
+LOGIN_OK=false
+for i in $(seq 1 5); do
+  LOGIN_RES=$(curl -s -c /tmp/xui-cookie -X POST \
+    "http://127.0.0.1:${XUI_PANEL_PORT}/login" \
+    --data-raw "user=${XUI_USER}&pass=${XUI_PASS}" 2>/dev/null || true)
+  if echo "${LOGIN_RES}" | grep -qi '"success"\s*:\s*true'; then
+    echo -e "${YELLOW}[信息] 登录成功 (尝试 $i)${NC}"
+    LOGIN_OK=true
+    break
+  fi
+  echo -e "${YELLOW}[信息] 等待 x-ui 就绪 ($i/5)...${NC}"
+  sleep 3
+done
 
-# 切换 Xray 到最新版
-echo -e "${YELLOW}[信息] 切换 Xray 到最新版本...${NC}"
-# 获取当前设置，修改 xrayVersion 为 latest
-SETTINGS_DATA=$(curl -s -b /tmp/xui-cookie \
-  "http://127.0.0.1:${XUI_PANEL_PORT}/xui/setting/all")
-echo "${SETTINGS_DATA}" | jq '.xrayVersion = "latest"' 2>/dev/null | \
-  curl -s -b /tmp/xui-cookie -X POST \
-  "http://127.0.0.1:${XUI_PANEL_PORT}/xui/setting/update" \
-  -H "Content-Type: application/json" -d @- > /dev/null || true
+# 以下 API 操作用 set +e 避免因版本差异导致脚本中断
+set +e
 
-# 构建设置 JSON
-SETTINGS_JSON=$(jq -n --arg id "${SPLIT_PATH}" \
-  '{clients: [{id: $id, alterId: 0, security: "auto"}]}')
-STREAM_JSON=$(jq -n --arg path "/${SPLIT_PATH}" \
-  '{network: "ws", security: "none", wsSettings: {path: $path}}')
-SNIFFING_JSON='{"enabled":true,"destOverride":["http","tls"]}'
+if [ "$LOGIN_OK" = true ]; then
+  # 切换 Xray 到最新版
+  echo -e "${YELLOW}[信息] 切换 Xray 到最新版本...${NC}"
+  SETTINGS_DATA=$(curl -s -b /tmp/xui-cookie \
+    "http://127.0.0.1:${XUI_PANEL_PORT}/xui/setting/all" 2>/dev/null || true)
+  if [ -n "${SETTINGS_DATA}" ]; then
+    echo "${SETTINGS_DATA}" | jq '.xrayVersion = "latest"' 2>/dev/null | \
+      curl -s -b /tmp/xui-cookie -X POST \
+      "http://127.0.0.1:${XUI_PANEL_PORT}/xui/setting/update" \
+      -H "Content-Type: application/json" -d @- > /dev/null 2>&1 || true
+  fi
 
-# 添加入站规则
-echo -e "${YELLOW}[信息] 添加入站规则...${NC}"
-ADD_RESULT=$(curl -s -b /tmp/xui-cookie -X POST \
-  "http://127.0.0.1:${XUI_PANEL_PORT}/xui/inbound/add" \
-  -H "Content-Type: application/json" \
-  -d "$(jq -n \
-    --arg remark "" \
-    --arg protocol "vmess" \
-    --arg listen "127.0.0.1" \
-    --argjson port "${XRAY_PORT}" \
-    --argjson total 0 \
-    --argjson expiryTime 0 \
-    --arg settings "${SETTINGS_JSON}" \
-    --arg streamSettings "${STREAM_JSON}" \
-    --arg sniffing "${SNIFFING_JSON}" \
-    '{up: 0, down: 0, total: $total, remark: $remark,
-      enable: true, expiryTime: $expiryTime,
-      listen: $listen, port: $port, protocol: $protocol,
-      settings: $settings, streamSettings: $streamSettings,
-      sniffing: $sniffing}')")
+  # 构建设置 JSON
+  SETTINGS_JSON=$(jq -n --arg id "${SPLIT_PATH}" \
+    '{clients: [{id: $id, alterId: 0, security: "auto"}]}')
+  STREAM_JSON=$(jq -n --arg path "/${SPLIT_PATH}" \
+    '{network: "ws", security: "none", wsSettings: {path: $path}}')
+  SNIFFING_JSON='{"enabled":true,"destOverride":["http","tls"]}'
 
-echo -e "${YELLOW}[信息] 入站添加结果: ${ADD_RESULT}${NC}"
+  # 添加入站规则
+  echo -e "${YELLOW}[信息] 添加入站规则...${NC}"
+  ADD_RESULT=$(curl -s -b /tmp/xui-cookie -X POST \
+    "http://127.0.0.1:${XUI_PANEL_PORT}/xui/inbound/add" \
+    -H "Content-Type: application/json" \
+    -d "$(jq -n \
+      --arg remark "" \
+      --arg protocol "vmess" \
+      --arg listen "127.0.0.1" \
+      --argjson port "${XRAY_PORT}" \
+      --argjson total 0 \
+      --argjson expiryTime 0 \
+      --arg settings "${SETTINGS_JSON}" \
+      --arg streamSettings "${STREAM_JSON}" \
+      --arg sniffing "${SNIFFING_JSON}" \
+      '{up: 0, down: 0, total: $total, remark: $remark,
+        enable: true, expiryTime: $expiryTime,
+        listen: $listen, port: $port, protocol: $protocol,
+        settings: $settings, streamSettings: $streamSettings,
+        sniffing: $sniffing}')" 2>/dev/null || true)
+  echo -e "${YELLOW}[信息] 入站添加结果: ${ADD_RESULT}${NC}"
+else
+  echo -e "${YELLOW}[警告] x-ui 登录失败，跳过 API 配置。请手动登录面板完成设置。${NC}"
+fi
+
+# 恢复 set -e
+set -e
 
 # 生成 VMess 分享链接
 echo -e "${YELLOW}[信息] 生成 VMess 分享链接...${NC}"
