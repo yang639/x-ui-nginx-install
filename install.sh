@@ -101,22 +101,63 @@ INBOUND_STREAM=$(jq -n --arg path "/${SPLIT_PATH}" \
   '{network: "ws", security: "none", wsSettings: {path: $path}}')
 INBOUND_SNIFF='{"enabled":true,"destOverride":["http","tls"]}'
 
-# 写入 SQL 到临时文件再执行，方便调试
-cat > /tmp/xui-inbound.sql << SQLEOF
-INSERT INTO inbound (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing)
+# 检测入站表名 (不同 x-ui 版本表名不同: inbound / inbounds 等)
+echo -e "${YELLOW}[调试] 数据库表列表:${NC}"
+sqlite3 /etc/x-ui/x-ui.db ".tables" 2>&1 || true
+INBOUND_TABLE=$(sqlite3 /etc/x-ui/x-ui.db ".tables" 2>/dev/null | tr ' ' '\n' | grep -i 'inbound' | head -1)
+if [ -z "${INBOUND_TABLE}" ]; then
+  echo -e "${RED}[错误] 找不到入站表，x-ui 数据库可能未初始化，请检查 x-ui 是否正常运行。${NC}"
+  echo -e "${YELLOW}[调试] 完整 schema:${NC}"
+  sqlite3 /etc/x-ui/x-ui.db ".schema" 2>&1 || true
+else
+  echo -e "${YELLOW}[调试] 检测到入站表: ${INBOUND_TABLE}${NC}"
+
+  # 检测列名是否使用 settings 还是其它
+  SCHEMA=$(sqlite3 /etc/x-ui/x-ui.db ".schema ${INBOUND_TABLE}" 2>/dev/null)
+  echo -e "${YELLOW}[调试] 表结构: ${SCHEMA}${NC}"
+
+  # 构建并执行 INSERT
+  cat > /tmp/xui-inbound.sql << SQLEOF
+INSERT INTO ${INBOUND_TABLE} (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing)
 VALUES (1, 0, 0, 0, '', 1, 0, '127.0.0.1', ${XRAY_PORT}, 'vmess', '${INBOUND_SETTINGS}', '${INBOUND_STREAM}', 'inbound-${XRAY_PORT}', '${INBOUND_SNIFF}');
 SQLEOF
 
-echo -e "${YELLOW}[调试] 写入的 SQL:${NC}"
-cat /tmp/xui-inbound.sql
+  echo -e "${YELLOW}[调试] 写入的 SQL:${NC}"
+  cat /tmp/xui-inbound.sql
 
-if sqlite3 /etc/x-ui/x-ui.db < /tmp/xui-inbound.sql 2>&1; then
-  INBOUND_COUNT=$(sqlite3 /etc/x-ui/x-ui.db "SELECT COUNT(*) FROM inbound WHERE port=${XRAY_PORT};" 2>/dev/null || echo "0")
-  echo -e "${GREEN}[信息] 入站添加成功 (端口 ${XRAY_PORT}，当前共 ${INBOUND_COUNT} 条)${NC}"
-else
-  echo -e "${RED}[错误] 入站添加失败，请检查上方错误信息${NC}"
+  if sqlite3 /etc/x-ui/x-ui.db < /tmp/xui-inbound.sql 2>&1; then
+    INBOUND_COUNT=$(sqlite3 /etc/x-ui/x-ui.db "SELECT COUNT(*) FROM ${INBOUND_TABLE} WHERE port=${XRAY_PORT};" 2>/dev/null || echo "0")
+    echo -e "${GREEN}[信息] 入站添加成功 (端口 ${XRAY_PORT}，当前共 ${INBOUND_COUNT} 条)${NC}"
+  else
+    echo -e "${RED}[错误] 入站添加失败，尝试用 API 兜底...${NC}"
+    # API 兜底
+    LOGIN_RES=$(curl -s -c /tmp/xui-cookie -X POST \
+      "http://127.0.0.1:${XUI_PANEL_PORT}/login" \
+      --data-raw "user=${XUI_USER}&pass=${XUI_PASS}" 2>/dev/null || true)
+    if echo "${LOGIN_RES}" | grep -qiE '"success"\s*:\s*true'; then
+      curl -s -b /tmp/xui-cookie -X POST \
+        "http://127.0.0.1:${XUI_PANEL_PORT}/xui/inbound/add" \
+        -H "Content-Type: application/json" \
+        -d "$(jq -n \
+          --arg remark "" \
+          --arg protocol "vmess" \
+          --arg listen "127.0.0.1" \
+          --argjson port "${XRAY_PORT}" \
+          --argjson total 0 \
+          --argjson expiryTime 0 \
+          --arg settings "${INBOUND_SETTINGS}" \
+          --arg streamSettings "${INBOUND_STREAM}" \
+          --arg sniffing "${INBOUND_SNIFF}" \
+          '{up: 0, down: 0, total: $total, remark: $remark,
+            enable: true, expiryTime: $expiryTime,
+            listen: $listen, port: $port, protocol: $protocol,
+            settings: $settings, streamSettings: $streamSettings,
+            sniffing: $sniffing}')" > /dev/null 2>&1 || true
+      echo -e "${YELLOW}[信息] API 入站添加已尝试${NC}"
+    fi
+  fi
+  rm -f /tmp/xui-inbound.sql
 fi
-rm -f /tmp/xui-inbound.sql
 
 # 最终重启 x-ui 使所有配置生效
 echo -e "${YELLOW}[信息] 重启 x-ui 使配置生效...${NC}"
