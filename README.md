@@ -14,7 +14,7 @@
 ## 使用方式
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/yang639/x-ui-nginx-install/main/install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/yang639/x-ui-nginx-install/master/install.sh)
 ```
 
 或本地运行：
