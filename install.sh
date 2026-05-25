@@ -144,6 +144,14 @@ echo ""
 echo -e "${YELLOW}[3/8] 安装 nginx...${NC}"
 apt install nginx -y
 
+# 生成自签名占位证书（后续被 acme.sh 正式证书替换）
+echo -e "${YELLOW}[*] 生成占位 SSL 证书...${NC}"
+mkdir -p /etc/x-ui
+openssl req -x509 -nodes -days 1 -newkey rsa:2048 \
+  -keyout /etc/x-ui/server.key \
+  -out /etc/x-ui/server.crt \
+  -subj "/CN=${DOMAIN}" 2>/dev/null
+
 # 4. 生成 nginx 配置
 echo -e "${YELLOW}[4/8] 生成 nginx 配置...${NC}"
 cat > /etc/nginx/nginx.conf << NGINX_EOF
