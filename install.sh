@@ -50,9 +50,9 @@ echo ""
 echo -e "${YELLOW}[1/8] 更新包列表并安装 curl...${NC}"
 apt update && apt install curl -y
 
-# 2. 安装 x-ui
+# 2. 安装 x-ui（自动应答交互式安装）
 echo -e "${YELLOW}[2/8] 安装 x-ui...${NC}"
-bash <(curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh)
+printf 'y\nadmin\nadmin\n%s\n' "${XUI_PORT}" | bash <(curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh)
 
 # ========== 配置 x-ui 面板 ==========
 echo -e "${YELLOW}[*] 配置 x-ui 面板...${NC}"
@@ -63,18 +63,18 @@ apt install sqlite3 jq openssl -y
 # 等待 x-ui 完全启动并创建数据库
 sleep 5
 
-# 从数据库读取 x-ui 实际配置（凭据、端口）
-XUI_PANEL_PORT=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webPort'" 2>/dev/null || echo "54321")
+# 端口已在安装时设为 XUI_PORT，无需再改
+XUI_PANEL_PORT="${XUI_PORT}"
+
+# 从数据库读取凭据（已在安装时设为 admin/admin）
 XUI_USER=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webUser'" 2>/dev/null || echo "admin")
 XUI_PASS=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webPass'" 2>/dev/null || echo "admin")
 echo -e "${YELLOW}[信息] x-ui 端口: ${XUI_PANEL_PORT}, 用户: ${XUI_USER}${NC}"
 
-# 修改 x-ui 面板端口和路径为我们生成的随机值
-sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='${XUI_PORT}' WHERE key='webPort'" 2>/dev/null || true
+# 设置面板 URL 路径前缀
 sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='/${XUI_PATH}-xui' WHERE key='webBasePath'" 2>/dev/null || true
 systemctl restart x-ui 2>/dev/null || x-ui restart 2>/dev/null || true
 sleep 5
-XUI_PANEL_PORT="${XUI_PORT}"
 
 # 登录 x-ui（带重试，最多 5 次）
 echo -e "${YELLOW}[信息] 登录 x-ui 面板 API...${NC}"
