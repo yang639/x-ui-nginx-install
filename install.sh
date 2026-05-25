@@ -121,20 +121,14 @@ echo -e "${YELLOW}[信息] 入站添加结果: ${ADD_RESULT}${NC}"
 # 生成 VMess 分享链接
 echo -e "${YELLOW}[信息] 生成 VMess 分享链接...${NC}"
 VMESS_JSON=$(jq -n \
-  --arg v "2" \
-  --arg ps "" \
   --arg add "${DOMAIN}" \
   --arg port "443" \
   --arg id "${SPLIT_PATH}" \
-  --arg aid "0" \
   --arg net "ws" \
-  --arg type "none" \
-  --arg host "" \
   --arg path "/${SPLIT_PATH}" \
   --arg tls "tls" \
-  '{v: $v, ps: $ps, add: $add, port: $port, id: $id,
-    aid: $aid, net: $net, type: $type, host: $host,
-    path: $path, tls: $tls}')
+  '{add: $add, port: $port, id: $id,
+    net: $net, path: $path, tls: $tls}')
 
 VMESS_LINK="vmess://$(echo -n "${VMESS_JSON}" | base64 -w 0)"
 
