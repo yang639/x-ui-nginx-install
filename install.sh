@@ -35,14 +35,14 @@ fi
 # 自动生成随机配置
 SPLIT_PATH=$(gen_uuid)       # 分流路径
 XRAY_PORT=$(gen_port)        # Xray 端口
-XUI_PATH=$(gen_uuid)         # x-ui 路径
+XUI_PATH="$(gen_uuid)-xui"   # x-ui 路径
 XUI_PORT=$(gen_port)         # x-ui 监听端口
 
 echo ""
 echo -e "${YELLOW}[信息] 域名:       ${DOMAIN}${NC}"
 echo -e "${YELLOW}[信息] 分流路径:   /${SPLIT_PATH}${NC}"
 echo -e "${YELLOW}[信息] Xray 端口:   ${XRAY_PORT}${NC}"
-echo -e "${YELLOW}[信息] x-ui 路径:   /${XUI_PATH}-xui${NC}"
+echo -e "${YELLOW}[信息] x-ui 路径:   /${XUI_PATH}${NC}"
 echo -e "${YELLOW}[信息] x-ui 端口:   ${XUI_PORT}${NC}"
 echo ""
 
@@ -72,7 +72,7 @@ XUI_PASS=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webP
 echo -e "${YELLOW}[信息] x-ui 端口: ${XUI_PANEL_PORT}, 用户: ${XUI_USER}${NC}"
 
 # 设置面板 URL 路径前缀
-sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='/${XUI_PATH}-xui' WHERE key='webBasePath'" 2>/dev/null || true
+sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='/${XUI_PATH}' WHERE key='webBasePath'" 2>/dev/null || true
 systemctl restart x-ui 2>/dev/null || x-ui restart 2>/dev/null || true
 sleep 5
 
@@ -240,7 +240,7 @@ http {
             proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         }
 
-        location /${XUI_PATH}-xui {
+        location /${XUI_PATH} {
             proxy_redirect off;
             proxy_pass http://127.0.0.1:${XUI_PORT};
             proxy_http_version 1.1;
@@ -288,7 +288,7 @@ echo ""
 echo -e "  域名:       ${GREEN}${DOMAIN}${NC}"
 echo -e "  分流路径:   ${GREEN}/${SPLIT_PATH}${NC}"
 echo -e "  Xray 端口:  ${GREEN}${XRAY_PORT}${NC}"
-echo -e "  x-ui 路径:  ${GREEN}/${XUI_PATH}-xui${NC}"
+echo -e "  x-ui 路径:  ${GREEN}/${XUI_PATH}${NC}"
 echo -e "  x-ui 端口:  ${GREEN}${XUI_PORT}${NC}"
 echo -e "  证书路径:   ${GREEN}/etc/x-ui/server.crt${NC}"
 echo -e "  私钥路径:   ${GREEN}/etc/x-ui/server.key${NC}"
