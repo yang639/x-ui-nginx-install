@@ -76,71 +76,52 @@ sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='/${XUI_PATH}' WHERE key='w
 systemctl restart x-ui 2>/dev/null || x-ui restart 2>/dev/null || true
 sleep 5
 
-# 登录 x-ui（带重试，最多 5 次）
-echo -e "${YELLOW}[信息] 登录 x-ui 面板 API...${NC}"
-LOGIN_OK=false
-for i in $(seq 1 5); do
-  LOGIN_RES=$(curl -s -c /tmp/xui-cookie -X POST \
-    "http://127.0.0.1:${XUI_PANEL_PORT}/login" \
-    --data-raw "user=${XUI_USER}&pass=${XUI_PASS}" 2>/dev/null || true)
-  if echo "${LOGIN_RES}" | grep -qiE '"success"\s*:\s*true'; then
-    echo -e "${YELLOW}[信息] 登录成功 (尝试 $i)${NC}"
-    LOGIN_OK=true
-    break
-  fi
-  echo -e "${YELLOW}[信息] 等待 x-ui 就绪 ($i/5)...${NC}"
-  sleep 3
-done
-
-# 以下 API 操作用 set +e 避免因版本差异导致脚本中断
+# 切换 Xray 到最新版 (设置标记，x-ui 重启后自动拉取)
+echo -e "${YELLOW}[信息] 切换 Xray 到最新版本...${NC}"
 set +e
-
-if [ "$LOGIN_OK" = true ]; then
-  # 切换 Xray 到最新版
-  echo -e "${YELLOW}[信息] 切换 Xray 到最新版本...${NC}"
-  SETTINGS_DATA=$(curl -s -b /tmp/xui-cookie \
-    "http://127.0.0.1:${XUI_PANEL_PORT}/xui/setting/all" 2>/dev/null || true)
-  if [ -n "${SETTINGS_DATA}" ]; then
-    echo "${SETTINGS_DATA}" | jq '.xrayVersion = "latest"' 2>/dev/null | \
-      curl -s -b /tmp/xui-cookie -X POST \
-      "http://127.0.0.1:${XUI_PANEL_PORT}/xui/setting/update" \
-      -H "Content-Type: application/json" -d @- > /dev/null 2>&1 || true
-  fi
-
-  # 构建设置 JSON
-  SETTINGS_JSON=$(jq -n --arg id "${SPLIT_PATH}" \
-    '{clients: [{id: $id, alterId: 0, security: "auto"}]}')
-  STREAM_JSON=$(jq -n --arg path "/${SPLIT_PATH}" \
-    '{network: "ws", security: "none", wsSettings: {path: $path}}')
-  SNIFFING_JSON='{"enabled":true,"destOverride":["http","tls"]}'
-
-  # 添加入站规则
-  echo -e "${YELLOW}[信息] 添加入站规则...${NC}"
-  ADD_RESULT=$(curl -s -b /tmp/xui-cookie -X POST \
-    "http://127.0.0.1:${XUI_PANEL_PORT}/xui/inbound/add" \
+sqlite3 /etc/x-ui/x-ui.db "INSERT OR REPLACE INTO settings (key, value) VALUES ('xrayVersion', 'latest');" 2>/dev/null
+# API 兜底
+LOGIN_RES=$(curl -s -c /tmp/xui-cookie -X POST \
+  "http://127.0.0.1:${XUI_PANEL_PORT}/login" \
+  --data-raw "user=${XUI_USER}&pass=${XUI_PASS}" 2>/dev/null || true)
+if echo "${LOGIN_RES}" | grep -qiE '"success"\s*:\s*true'; then
+  curl -s -b /tmp/xui-cookie -X POST \
+    "http://127.0.0.1:${XUI_PANEL_PORT}/xui/setting/update" \
     -H "Content-Type: application/json" \
-    -d "$(jq -n \
-      --arg remark "" \
-      --arg protocol "vmess" \
-      --arg listen "127.0.0.1" \
-      --argjson port "${XRAY_PORT}" \
-      --argjson total 0 \
-      --argjson expiryTime 0 \
-      --arg settings "${SETTINGS_JSON}" \
-      --arg streamSettings "${STREAM_JSON}" \
-      --arg sniffing "${SNIFFING_JSON}" \
-      '{up: 0, down: 0, total: $total, remark: $remark,
-        enable: true, expiryTime: $expiryTime,
-        listen: $listen, port: $port, protocol: $protocol,
-        settings: $settings, streamSettings: $streamSettings,
-        sniffing: $sniffing}')" 2>/dev/null || true)
-  echo -e "${YELLOW}[信息] 入站添加结果: ${ADD_RESULT}${NC}"
-else
-  echo -e "${YELLOW}[警告] x-ui 登录失败，跳过 API 配置。请手动登录面板完成设置。${NC}"
+    -d '{"xrayVersion":"latest"}' > /dev/null 2>&1 || true
 fi
-
-# 恢复 set -e
+echo -e "${YELLOW}[信息] Xray 将在 x-ui 重启后自动更新${NC}"
 set -e
+
+# 直接写入数据库添加入站 (绕过 API 兼容性问题)
+echo -e "${YELLOW}[信息] 添加入站规则 (直接写库)...${NC}"
+INBOUND_SETTINGS=$(jq -n --arg id "${SPLIT_PATH}" \
+  '{clients: [{id: $id, alterId: 0, security: "auto"}]}')
+INBOUND_STREAM=$(jq -n --arg path "/${SPLIT_PATH}" \
+  '{network: "ws", security: "none", wsSettings: {path: $path}}')
+INBOUND_SNIFF='{"enabled":true,"destOverride":["http","tls"]}'
+
+# 写入 SQL 到临时文件再执行，方便调试
+cat > /tmp/xui-inbound.sql << SQLEOF
+INSERT INTO inbound (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing)
+VALUES (1, 0, 0, 0, '', 1, 0, '127.0.0.1', ${XRAY_PORT}, 'vmess', '${INBOUND_SETTINGS}', '${INBOUND_STREAM}', 'inbound-${XRAY_PORT}', '${INBOUND_SNIFF}');
+SQLEOF
+
+echo -e "${YELLOW}[调试] 写入的 SQL:${NC}"
+cat /tmp/xui-inbound.sql
+
+if sqlite3 /etc/x-ui/x-ui.db < /tmp/xui-inbound.sql 2>&1; then
+  INBOUND_COUNT=$(sqlite3 /etc/x-ui/x-ui.db "SELECT COUNT(*) FROM inbound WHERE port=${XRAY_PORT};" 2>/dev/null || echo "0")
+  echo -e "${GREEN}[信息] 入站添加成功 (端口 ${XRAY_PORT}，当前共 ${INBOUND_COUNT} 条)${NC}"
+else
+  echo -e "${RED}[错误] 入站添加失败，请检查上方错误信息${NC}"
+fi
+rm -f /tmp/xui-inbound.sql
+
+# 最终重启 x-ui 使所有配置生效
+echo -e "${YELLOW}[信息] 重启 x-ui 使配置生效...${NC}"
+systemctl restart x-ui 2>/dev/null || x-ui restart 2>/dev/null || true
+sleep 3
 
 # 生成 VMess 分享链接
 echo -e "${YELLOW}[信息] 生成 VMess 分享链接...${NC}"
@@ -284,9 +265,10 @@ acme.sh --install-cert -d "$DOMAIN" --ecc \
     --fullchain-file /etc/x-ui/server.crt \
     --reloadcmd "systemctl enable nginx 2>/dev/null; systemctl force-reload nginx 2>/dev/null || systemctl start nginx"
 
-# 最终重载 nginx 确保配置生效
-echo -e "${YELLOW}[*] 最终重载 nginx...${NC}"
-systemctl reload nginx 2>/dev/null || systemctl start nginx 2>/dev/null || true
+# 最终重启 nginx 确保配置生效
+echo -e "${YELLOW}[*] 最终重启 nginx...${NC}"
+nginx -t 2>&1 || true
+systemctl restart nginx 2>/dev/null || systemctl start nginx 2>/dev/null || true
 
 echo ""
 echo -e "${GREEN}============================================${NC}"
@@ -298,6 +280,8 @@ echo -e "  分流路径:   ${GREEN}/${SPLIT_PATH}${NC}"
 echo -e "  Xray 端口:  ${GREEN}${XRAY_PORT}${NC}"
 echo -e "  x-ui 路径:  ${GREEN}/${XUI_PATH}${NC}"
 echo -e "  x-ui 端口:  ${GREEN}${XUI_PORT}${NC}"
+echo -e "  x-ui 账号:  ${GREEN}${XUI_USER}${NC}"
+echo -e "  x-ui 密码:  ${GREEN}${XUI_PASS}${NC}"
 echo -e "  证书路径:   ${GREEN}/etc/x-ui/server.crt${NC}"
 echo -e "  私钥路径:   ${GREEN}/etc/x-ui/server.key${NC}"
 echo ""
