@@ -83,7 +83,7 @@ for i in $(seq 1 5); do
   LOGIN_RES=$(curl -s -c /tmp/xui-cookie -X POST \
     "http://127.0.0.1:${XUI_PANEL_PORT}/login" \
     --data-raw "user=${XUI_USER}&pass=${XUI_PASS}" 2>/dev/null || true)
-  if echo "${LOGIN_RES}" | grep -qi '"success"\s*:\s*true'; then
+  if echo "${LOGIN_RES}" | grep -qiE '"success"\s*:\s*true'; then
     echo -e "${YELLOW}[信息] 登录成功 (尝试 $i)${NC}"
     LOGIN_OK=true
     break
@@ -174,7 +174,7 @@ mkdir -p /etc/x-ui
 openssl req -x509 -nodes -days 1 -newkey rsa:2048 \
   -keyout /etc/x-ui/server.key \
   -out /etc/x-ui/server.crt \
-  -subj "/CN=${DOMAIN}" 2>/dev/null
+  -subj "/CN=${DOMAIN}" 2>/dev/null || true
 
 # 4. 生成 nginx 配置
 echo -e "${YELLOW}[4/8] 生成 nginx 配置...${NC}"
@@ -264,6 +264,10 @@ NGINX_EOF
 echo -e "${YELLOW}[5/8] 安装 acme.sh...${NC}"
 curl https://get.acme.sh | sh
 ln -sf /root/.acme.sh/acme.sh /usr/local/bin/acme.sh
+if [ ! -f /root/.acme.sh/acme.sh ]; then
+  echo -e "${RED}[错误] acme.sh 安装失败，请检查网络。${NC}"
+  exit 1
+fi
 
 # 6. 设置默认 CA
 echo -e "${YELLOW}[6/8] 设置默认 CA 为 Let's Encrypt...${NC}"
@@ -278,7 +282,11 @@ echo -e "${YELLOW}[8/8] 安装证书到 /etc/x-ui/ 并重载 nginx...${NC}"
 acme.sh --install-cert -d "$DOMAIN" --ecc \
     --key-file /etc/x-ui/server.key \
     --fullchain-file /etc/x-ui/server.crt \
-    --reloadcmd "systemctl force-reload nginx"
+    --reloadcmd "systemctl enable nginx 2>/dev/null; systemctl force-reload nginx 2>/dev/null || systemctl start nginx"
+
+# 最终重载 nginx 确保配置生效
+echo -e "${YELLOW}[*] 最终重载 nginx...${NC}"
+systemctl reload nginx 2>/dev/null || systemctl start nginx 2>/dev/null || true
 
 echo ""
 echo -e "${GREEN}============================================${NC}"
