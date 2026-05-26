@@ -234,8 +234,11 @@ http {
         ssl_protocols    TLSv1.2 TLSv1.3;
         ssl_prefer_server_ciphers off;
 
+        resolver 8.8.8.8 1.1.1.1 valid=60s ipv6=off;
+
         location / {
-            proxy_pass https://pan.aaaab3n.moe/;
+            set \$backend "pan.aaaab3n.moe";
+            proxy_pass https://\$backend/;
             proxy_redirect off;
             proxy_ssl_server_name on;
             sub_filter_once off;
