@@ -82,21 +82,23 @@ XUI_PASS="${XUI_PASS:-admin}"
 echo -e "${YELLOW}[信息] x-ui 端口: ${XUI_PANEL_PORT}, 用户: ${XUI_USER}${NC}"
 
 
-# 切换 Xray 到最新版 (设置标记，x-ui 重启后自动拉取)
-echo -e "${YELLOW}[信息] 切换 Xray 到最新版本...${NC}"
+# 手动下载最新 Xray 二进制覆盖
+echo -e "${YELLOW}[信息] 下载最新 Xray...${NC}"
 set +e
 sqlite3 /etc/x-ui/x-ui.db "INSERT OR REPLACE INTO settings (key, value) VALUES ('xrayVersion', 'latest');" 2>/dev/null
-# API 兜底
-LOGIN_RES=$(curl -s -c /tmp/xui-cookie -X POST \
-  "http://127.0.0.1:${XUI_PANEL_PORT}/login" \
-  --data-raw "user=${XUI_USER}&pass=${XUI_PASS}" 2>/dev/null || true)
-if echo "${LOGIN_RES}" | grep -qiE '"success"\s*:\s*true'; then
-  curl -s -b /tmp/xui-cookie -X POST \
-    "http://127.0.0.1:${XUI_PANEL_PORT}/xui/setting/update" \
-    -H "Content-Type: application/json" \
-    -d '{"xrayVersion":"latest"}' > /dev/null 2>&1 || true
+apt install unzip -y 2>/dev/null
+curl -L -o /tmp/xray.zip "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip" 2>/dev/null
+if [ -f /tmp/xray.zip ] && [ -s /tmp/xray.zip ]; then
+    unzip -o /tmp/xray.zip xray -d /tmp/ 2>/dev/null
+    if [ -f /tmp/xray ]; then
+        cp /tmp/xray /usr/local/x-ui/bin/xray-linux-amd64
+        chmod +x /usr/local/x-ui/bin/xray-linux-amd64
+        echo -e "${GREEN}[信息] Xray 已更新至最新版${NC}"
+    fi
+    rm -f /tmp/xray.zip /tmp/xray
+else
+    echo -e "${YELLOW}[警告] 无法下载最新 Xray，保留现有版本${NC}"
 fi
-echo -e "${YELLOW}[信息] Xray 将在 x-ui 重启后自动更新${NC}"
 set -e
 
 # 直接写入数据库添加入站 (绕过 API 兼容性问题)
@@ -175,7 +177,7 @@ sleep 3
 
 VMESS_JSON=$(jq -n \
   --arg add "${DOMAIN}" \
-  --arg port "443" \
+  --argjson port 443 \
   --arg id "${SPLIT_PATH}" \
   --arg net "ws" \
   --arg path "/${SPLIT_PATH}" \
@@ -319,6 +321,9 @@ fi
 # 6. 设置默认 CA
 echo -e "${YELLOW}[6/8] 设置默认 CA 为 Let's Encrypt...${NC}"
 acme.sh --set-default-ca --server letsencrypt
+
+# 确保 nginx 在运行以响应证书验证
+systemctl start nginx 2>/dev/null || true
 
 # 7. 签发证书
 echo -e "${YELLOW}[7/8] 签发 ECC 证书 (域名: ${DOMAIN})...${NC}"
