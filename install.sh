@@ -32,6 +32,14 @@ if [ -z "$DOMAIN" ]; then
     exit 1
 fi
 
+# 检查是否已安装
+if [ -f /etc/x-ui/.installed ]; then
+    echo -e "${RED}[错误] 检测到已安装 (${NC}/etc/x-ui/.installed${RED})${NC}"
+    echo -e "${RED}       重复运行会覆盖证书和破坏数据库。${NC}"
+    echo -e "${RED}       如需强制重装: rm -f /etc/x-ui/.installed${NC}"
+    exit 1
+fi
+
 # 自动生成随机配置
 SPLIT_PATH=$(gen_uuid)       # 分流路径
 XRAY_PORT=$(gen_port)        # Xray 端口
@@ -345,3 +353,6 @@ echo -e "  ${GREEN}${VMESS_LINK}${NC}"
 echo ""
 echo -e "${YELLOW}  证书将在 90 天后自动续期，无需手动操作。${NC}"
 echo ""
+
+# 标记安装完成，防止重复运行
+echo "installed" > /etc/x-ui/.installed
