@@ -91,8 +91,10 @@ curl -L -o /tmp/xray.zip "https://github.com/XTLS/Xray-core/releases/latest/down
 if [ -f /tmp/xray.zip ] && [ -s /tmp/xray.zip ]; then
     unzip -o /tmp/xray.zip xray -d /tmp/ 2>/dev/null
     if [ -f /tmp/xray ]; then
-        cp /tmp/xray /usr/local/x-ui/bin/xray-linux-amd64
+        systemctl stop x-ui 2>/dev/null
+        \cp -f /tmp/xray /usr/local/x-ui/bin/xray-linux-amd64
         chmod +x /usr/local/x-ui/bin/xray-linux-amd64
+        systemctl start x-ui 2>/dev/null
         echo -e "${GREEN}[信息] Xray 已更新至最新版${NC}"
     fi
     rm -f /tmp/xray.zip /tmp/xray
