@@ -18,6 +18,11 @@ gen_port() {
     echo $((RANDOM % 55536 + 10000))
 }
 
+# 生成随机密码 (8 位字母数字)
+gen_pass() {
+    tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 8
+}
+
 clear
 echo -e "${GREEN}============================================${NC}"
 echo -e "${GREEN}   x-ui + Nginx + SSL 一键安装脚本${NC}"
@@ -45,6 +50,8 @@ SPLIT_PATH=$(gen_uuid)       # 分流路径
 XRAY_PORT=$(gen_port)        # Xray 端口
 XUI_PATH="$(gen_uuid)-xui"   # x-ui 路径
 XUI_PORT=$(gen_port)         # x-ui 监听端口
+XUI_USER=$(gen_pass)         # x-ui 账号
+XUI_PASS=$(gen_pass)         # x-ui 密码
 
 echo ""
 echo -e "${YELLOW}[信息] 域名:       ${DOMAIN}${NC}"
@@ -52,6 +59,8 @@ echo -e "${YELLOW}[信息] 分流路径:   /${SPLIT_PATH}${NC}"
 echo -e "${YELLOW}[信息] Xray 端口:   ${XRAY_PORT}${NC}"
 echo -e "${YELLOW}[信息] x-ui 路径:   /${XUI_PATH}${NC}"
 echo -e "${YELLOW}[信息] x-ui 端口:   ${XUI_PORT}${NC}"
+echo -e "${YELLOW}[信息] x-ui 账号:   ${XUI_USER}${NC}"
+echo -e "${YELLOW}[信息] x-ui 密码:   ${XUI_PASS}${NC}"
 echo ""
 
 # 1. 更新包列表并安装 curl
@@ -60,7 +69,7 @@ apt update && apt install curl -y
 
 # 2. 安装 x-ui（自动应答交互式安装）
 echo -e "${YELLOW}[2/8] 安装 x-ui...${NC}"
-printf 'y\nadmin\nadmin\n%s\n' "${XUI_PORT}" | bash <(curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh)
+printf 'y\n%s\n%s\n%s\n' "${XUI_USER}" "${XUI_PASS}" "${XUI_PORT}" | bash <(curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh)
 
 # ========== 配置 x-ui 面板 ==========
 echo -e "${YELLOW}[*] 配置 x-ui 面板...${NC}"
@@ -74,11 +83,11 @@ sleep 5
 # 端口已在安装时设为 XUI_PORT，无需再改
 XUI_PANEL_PORT="${XUI_PORT}"
 
-# 从数据库读取凭据（已在安装时设为 admin/admin）
-XUI_USER=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webUser'" 2>/dev/null)
-XUI_USER="${XUI_USER:-admin}"
-XUI_PASS=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webPass'" 2>/dev/null)
-XUI_PASS="${XUI_PASS:-admin}"
+# 从数据库读取凭据，读不到则用安装时传入的随机值
+_DB_USER=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webUser'" 2>/dev/null)
+XUI_USER="${_DB_USER:-${XUI_USER}}"
+_DB_PASS=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webPass'" 2>/dev/null)
+XUI_PASS="${_DB_PASS:-${XUI_PASS}}"
 echo -e "${YELLOW}[信息] x-ui 端口: ${XUI_PANEL_PORT}, 用户: ${XUI_USER}${NC}"
 
 
