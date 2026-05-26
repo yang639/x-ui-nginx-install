@@ -67,14 +67,12 @@ sleep 5
 XUI_PANEL_PORT="${XUI_PORT}"
 
 # 从数据库读取凭据（已在安装时设为 admin/admin）
-XUI_USER=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webUser'" 2>/dev/null || echo "admin")
-XUI_PASS=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webPass'" 2>/dev/null || echo "admin")
+XUI_USER=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webUser'" 2>/dev/null)
+XUI_USER="${XUI_USER:-admin}"
+XUI_PASS=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webPass'" 2>/dev/null)
+XUI_PASS="${XUI_PASS:-admin}"
 echo -e "${YELLOW}[信息] x-ui 端口: ${XUI_PANEL_PORT}, 用户: ${XUI_USER}${NC}"
 
-# 设置面板 URL 路径前缀
-sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='/${XUI_PATH}' WHERE key='webBasePath'" 2>/dev/null || true
-systemctl restart x-ui 2>/dev/null || x-ui restart 2>/dev/null || true
-sleep 5
 
 # 切换 Xray 到最新版 (设置标记，x-ui 重启后自动拉取)
 echo -e "${YELLOW}[信息] 切换 Xray 到最新版本...${NC}"
@@ -159,13 +157,14 @@ SQLEOF
   rm -f /tmp/xui-inbound.sql
 fi
 
+# 设置面板 URL 路径前缀
+sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='/${XUI_PATH}' WHERE key='webBasePath'" 2>/dev/null || true
+
 # 最终重启 x-ui 使所有配置生效
-echo -e "${YELLOW}[信息] 重启 x-ui 使配置生效...${NC}"
+echo -e "${YELLOW}[信息] 保存配置并重启 x-ui...${NC}"
 systemctl restart x-ui 2>/dev/null || x-ui restart 2>/dev/null || true
 sleep 3
 
-# 生成 VMess 分享链接
-echo -e "${YELLOW}[信息] 生成 VMess 分享链接...${NC}"
 VMESS_JSON=$(jq -n \
   --arg add "${DOMAIN}" \
   --arg port "443" \
@@ -175,16 +174,7 @@ VMESS_JSON=$(jq -n \
   --arg tls "tls" \
   '{add: $add, port: $port, id: $id,
     net: $net, path: $path, tls: $tls}')
-
 VMESS_LINK="vmess://$(echo -n "${VMESS_JSON}" | base64 -w 0)"
-
-echo ""
-echo -e "${GREEN}============================================${NC}"
-echo -e "${GREEN}   VMess 分享链接${NC}"
-echo -e "${GREEN}============================================${NC}"
-echo ""
-echo -e "  ${GREEN}${VMESS_LINK}${NC}"
-echo ""
 
 # 3. 安装 nginx
 echo -e "${YELLOW}[3/8] 安装 nginx...${NC}"
@@ -343,15 +333,15 @@ echo -e "${GREEN}============================================${NC}"
 echo -e "${GREEN}   全部完成！${NC}"
 echo -e "${GREEN}============================================${NC}"
 echo ""
-echo -e "  域名:       ${GREEN}${DOMAIN}${NC}"
-echo -e "  分流路径:   ${GREEN}/${SPLIT_PATH}${NC}"
-echo -e "  Xray 端口:  ${GREEN}${XRAY_PORT}${NC}"
-echo -e "  x-ui 路径:  ${GREEN}/${XUI_PATH}${NC}"
-echo -e "  x-ui 端口:  ${GREEN}${XUI_PORT}${NC}"
+echo -e "  x-ui 后台:  ${GREEN}https://${DOMAIN}/${XUI_PATH}${NC}"
 echo -e "  x-ui 账号:  ${GREEN}${XUI_USER}${NC}"
 echo -e "  x-ui 密码:  ${GREEN}${XUI_PASS}${NC}"
-echo -e "  证书路径:   ${GREEN}/etc/x-ui/server.crt${NC}"
-echo -e "  私钥路径:   ${GREEN}/etc/x-ui/server.key${NC}"
+echo ""
+echo -e "${GREEN}============================================${NC}"
+echo -e "${GREEN}   VMess 分享链接${NC}"
+echo -e "${GREEN}============================================${NC}"
+echo ""
+echo -e "  ${GREEN}${VMESS_LINK}${NC}"
 echo ""
 echo -e "${YELLOW}  证书将在 90 天后自动续期，无需手动操作。${NC}"
 echo ""
