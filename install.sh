@@ -190,6 +190,44 @@ echo ""
 echo -e "${YELLOW}[3/8] 安装 nginx...${NC}"
 apt install nginx -y
 
+# 创建伪装网盘登录页面
+echo -e "${YELLOW}[*] 创建伪装网盘登录页面...${NC}"
+mkdir -p /var/www/html
+cat > /var/www/html/index.html << 'HTMLEOF'
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AList | 登录</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;display:flex;justify-content:center;align-items:center}
+.login-card{background:#fff;border-radius:12px;padding:40px;width:380px;box-shadow:0 20px 60px rgba(0,0,0,0.3)}
+.logo{text-align:center;font-size:32px;font-weight:700;color:#333;margin-bottom:8px;letter-spacing:2px}
+.subtitle{text-align:center;color:#999;font-size:13px;margin-bottom:32px}
+.input-group{margin-bottom:20px}
+.input-group label{display:block;font-size:13px;color:#555;margin-bottom:6px}
+.input-group input{width:100%;height:42px;border:1px solid #e0e0e0;border-radius:6px;padding:0 14px;font-size:14px;transition:border-color .2s;outline:none}
+.input-group input:focus{border-color:#667eea}
+.btn-login{width:100%;height:44px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border:none;border-radius:6px;color:#fff;font-size:16px;cursor:pointer;margin-top:10px;letter-spacing:2px}
+.btn-login:hover{opacity:0.9}
+.footer{text-align:center;margin-top:24px;color:#bbb;font-size:12px}
+</style>
+</head>
+<body>
+<div class="login-card">
+<div class="logo">AList</div>
+<div class="subtitle">个人网盘 · 文件管理</div>
+<div class="input-group"><label>用户名</label><input type="text" placeholder="请输入用户名"></div>
+<div class="input-group"><label>密码</label><input type="password" placeholder="请输入密码"></div>
+<button class="btn-login" type="button">登 录</button>
+<div class="footer">AList v3 · Powered by Go</div>
+</div>
+</body>
+</html>
+HTMLEOF
+
 # 生成自签名占位证书（后续被 acme.sh 正式证书替换）
 echo -e "${YELLOW}[*] 生成占位 SSL 证书...${NC}"
 mkdir -p /etc/x-ui
@@ -234,23 +272,9 @@ http {
         ssl_protocols    TLSv1.2 TLSv1.3;
         ssl_prefer_server_ciphers off;
 
-        resolver 8.8.8.8 1.1.1.1 valid=60s ipv6=off;
-
         location / {
-            set \$backend "pan.aaaab3n.moe";
-            proxy_pass https://\$backend/;
-            proxy_redirect off;
-            proxy_ssl_server_name on;
-            sub_filter_once off;
-            sub_filter "pan.aaaab3n.moe" \$server_name;
-            proxy_set_header Host "pan.aaaab3n.moe";
-            proxy_set_header Referer \$http_referer;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header User-Agent \$http_user_agent;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto https;
-            proxy_set_header Accept-Encoding "";
-            proxy_set_header Accept-Language "zh-CN";
+            root /var/www/html;
+            index index.html;
         }
 
 
