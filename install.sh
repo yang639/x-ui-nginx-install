@@ -166,7 +166,7 @@ SQLEOF
 fi
 
 # 设置面板 URL 路径前缀
-sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='/${XUI_PATH}' WHERE key='webBasePath'" 2>/dev/null || true
+sqlite3 /etc/x-ui/x-ui.db "INSERT OR REPLACE INTO settings (key, value) VALUES ('webBasePath', '/${XUI_PATH}');" 2>/dev/null || true
 
 # 最终重启 x-ui 使所有配置生效
 echo -e "${YELLOW}[信息] 保存配置并重启 x-ui...${NC}"
